@@ -106,3 +106,15 @@ def test_load_laya_from_local_checkpoint(tmp_path):
     assert isinstance(m, ModernBertModel)
     for k, v in src.state_dict().items():
         assert torch.equal(m.state_dict()[k], v), k
+
+
+def test_classlabel_names_with_whitespace():
+    """galileo-ai/medical_transcription_40 has names like ' Pain Management'."""
+    feats = datasets.Features({"text": datasets.Value("string"),
+                               "label": datasets.ClassLabel(names=[" Pain Management", " Cardiology / Vascular"])})
+    ds = datasets.DatasetDict({"train": datasets.Dataset.from_dict(
+        {"text": ["note a", "note b", "note c"], "label": [0, 1, 1]}, features=feats)})
+    recs, _ = convert_dataset(ds, text_col="text", label_col="label", max_per_split=None)
+    assert set(recs["train"][0]["question"]["criteria"]) == {"Pain Management", "Cardiology / Vascular"}
+    for r in recs["train"]:
+        Example.from_record(r)

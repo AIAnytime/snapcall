@@ -5,7 +5,7 @@ Train, evaluate and deploy calibrated System One (Jev-style) decision models.
 Built by AI Anytime.
 """
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 import logging as _logging
 import os as _os

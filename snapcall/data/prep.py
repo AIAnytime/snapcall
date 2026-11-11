@@ -64,7 +64,7 @@ def build_records(splits: dict[str, list[tuple[str, str, Any]]], *, qtype: str =
 
     def norm(v: Any) -> list[str] | str | None:
         if isinstance(v, int) and not isinstance(v, bool) and class_names is not None:
-            return class_names[v] if 0 <= v < len(class_names) else None  # -1 = unlabeled
+            return label_str(class_names[v]) if 0 <= v < len(class_names) else None  # -1 = unlabeled
         if isinstance(v, (list, tuple)):
             vals = [norm(x) for x in v]
             return [x for x in vals if isinstance(x, str) and x]
@@ -95,7 +95,7 @@ def build_records(splits: dict[str, list[tuple[str, str, Any]]], *, qtype: str =
     is_multi = any(isinstance(l, list) for rows in clean.values() for _, _, l in rows)
     if is_multi and multi_label == "noul":
         universe = order_labels({x for rows in clean.values() for _, _, l in rows for x in (l if isinstance(l, list) else [l])}) \
-            if class_names is None else [n for n in class_names]
+            if class_names is None else [label_str(n) for n in class_names]
         universe = [u for u in universe if u.strip().lower() not in EMPTY]
         if top_labels:
             cnt = Counter(x for _, _, l in clean.get("train", []) or next(iter(clean.values())) for x in (l if isinstance(l, list) else [l]))
