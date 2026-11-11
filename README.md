@@ -226,7 +226,7 @@ On a RunPod pod, `snapcall ui` detects the pod and:
 - 💾 keeps runs and models on `/workspace`;
 - ⏱️ with `--auto-stop`, stops the pod after N hours so a small balance lasts.
 
-See the **[RunPod guide](deploy/runpod/README.md)** for pod settings and a $2 session plan.
+See the **[RunPod guide](deploy/runpod/README.md)** for pod settings.
 
 ## 🔌 Serving
 
