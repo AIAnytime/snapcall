@@ -221,8 +221,11 @@ def data_show(name: str, n: int = 5, split: str = "train"):
 def data_hf(source: str = typer.Argument(..., help="Preset id (banking77, emotion, ...) or a HF dataset id"),
             name: Optional[str] = None, config: Optional[str] = None, text_col: Optional[str] = None,
             label_col: Optional[str] = None, type: str = "choice", instructions: str = "",
-            max_per_split: int = 5000):
-    """Import a Hugging Face dataset."""
+            max_per_split: int = 5000,
+            top_labels: Optional[int] = typer.Option(None, help="Keep only the N most frequent labels"),
+            other_label: Optional[str] = typer.Option(None, help="Merge the remaining labels into this label"),
+            multi_label: str = typer.Option("single", help="List labels: single | first | noul (one yes/no per label)")):
+    """Import a Hugging Face dataset. Empty rows are skipped and numeric labels are ordered by value."""
     from .data.hub import HF_PRESETS, import_hf
     from .paths import load_settings
     p = next((x for x in HF_PRESETS if x["id"] == source), None)
@@ -236,22 +239,30 @@ def data_hf(source: str = typer.Argument(..., help="Preset id (banking77, emotio
         icol = None
         if not (text_col and label_col):
             raise typer.BadParameter("--text-col and --label-col are required for non-preset datasets")
+    if isinstance(text_col, str) and "," in text_col:
+        text_col = [c.strip() for c in text_col.split(",") if c.strip()]  # type: ignore[assignment]
     with con.status("Importing…") as st:
         meta = import_hf(source, name=name or source.split("/")[-1], text_col=text_col, label_col=label_col,
                          qtype=type, instructions=instructions, instructions_col=icol, config=config,
                          max_per_split=max_per_split, token=load_settings().get("hf_token"),
+                         top_labels=top_labels, other_label=other_label, multi_label=multi_label,
                          progress=lambda m: st.update(m))
     con.print(f"[green]✓[/] {meta['name']}: {meta['counts']}  ({meta['num_labels']} labels)")
+    prep = {k: v for k, v in (meta.get("prep") or {}).items() if k != "labels" and v}
+    if prep:
+        con.print(f"[dim]prep: {prep}[/]")
 
 
 @data_app.command("upload")
 def data_upload(file: Path, name: Optional[str] = None, text_col: Optional[str] = None,
-                label_col: Optional[str] = None, type: str = "choice", instructions: str = ""):
+                label_col: Optional[str] = None, type: str = "choice", instructions: str = "",
+                top_labels: Optional[int] = typer.Option(None, help="Keep only the N most frequent labels"),
+                multi_label: str = typer.Option("single", help="List labels: single | first | noul")):
     """Import a .jsonl / .json / .csv file (native System One rows or a table)."""
     from .data.local import import_rows, parse_bytes
     rows = parse_bytes(file.read_bytes(), file.name)
     meta = import_rows(name or file.stem, rows, text_col=text_col, label_col=label_col, qtype=type,
-                       instructions=instructions, filename=file.name)
+                       instructions=instructions, filename=file.name, top_labels=top_labels, multi_label=multi_label)
     con.print(f"[green]✓[/] {meta['name']}: {meta['counts']}")
     for w in meta.get("warnings", [])[:5]:
         con.print(f"[yellow]![/] {w}")

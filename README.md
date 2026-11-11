@@ -161,7 +161,8 @@ model.decide(state="Where is my new card?", questions={"intent": model.meta["que
 | Encoders | ModernBERT base/large, mmBERT small/base, DeBERTa v3 | full | ⚡ Fastest, Laya-style. Trains on a laptop |
 | Small LLMs | SmolLM2, LFM2 350M, LFM2.5 1.2B, Qwen3 0.6B/1.7B/4B | LoRA · QLoRA | Longer states, more reasoning |
 | Big bases | Qwen3.5 4B/9B Base | LoRA · QLoRA | Bases of Nimble, Tev1, Decider, kev |
-| Decision models | Laya, d1 600M/3B, Tev1 4B, Clef Flash 9B, Clef 27B | LoRA · QLoRA | 🧪 Experimental: continue from an open System One model |
+| Laya | `convaiinnovations/laya` (English, 395M), `convaiinnovations/laya:multilingual` (307M) | full · LoRA | ✅ Warm-start from Laya's decision-tuned encoder |
+| Other decision models | d1 600M/3B, Tev1 4B, Clef Flash 9B, Clef 27B | LoRA · QLoRA | 🧪 Experimental: continue from an open System One model |
 
 | Preset | For | Base |
 |---|---|---|
@@ -181,6 +182,19 @@ model.decide(state="Where is my new card?", questions={"intent": model.meta["que
 | 📄 Your files | `.jsonl`, `.json`, `.csv`, `.tsv`: native System One rows or any table with a text and a label column |
 | ✨ LLM synthetic | Describe the use case. The LLM proposes the question and options, then writes balanced examples (Anthropic, OpenAI, OpenRouter, Groq, Ollama…) |
 | 🎭 Faker | Templates such as `"I was charged {amount} for order {order_id}"`, filled with realistic fake values in 14 locales, no API key |
+
+Real datasets are messy, so imports clean up for you:
+- 🧽 Rows with empty text or labels are skipped.
+- 🔢 Numeric labels are ordered by value (ratings `1…10`, not `1, 10, 2`).
+- ✂️ `--top-labels N` keeps the N most frequent labels, and `--other-label` merges the rest into a catch-all.
+- 🏷️ `--multi-label single|first|noul` turns list labels into one choice, or one yes/no question per label.
+- 🧱 `--text-col a,b` joins several columns into the state.
+
+```bash
+snapcall data hf xamxte/cve-to-cwe --text-col description --label-col cwe_id --top-labels 40
+snapcall data hf bigbio/hallmarks_of_cancer --config hallmarks_of_cancer_source --text-col text \
+  --label-col label --multi-label noul
+```
 
 Faker also does **PII-safe augmentation** at train time: it swaps emails, phones, amounts and IDs, so the
 model learns the decision rather than the entities. Every dataset gets stratified train/validation/test splits.

@@ -42,7 +42,84 @@ def resolve_dtype(precision: str, device: torch.device) -> torch.dtype:
     return torch.float32
 
 
+# --------------------------------------------------------------------------- Laya
+# Laya (Convai Innovations) ships a ModernBERT / mmBERT encoder plus its own decision heads in one
+# safetensors file, without a transformers auto-class. We load the fine-tuned encoder into a standard
+# ModernBertModel and train Snapcall's typed head on top, which warm-starts from Laya's decision training.
+#   convaiinnovations/laya                    English (ModernBERT-large size, 395M)
+#   convaiinnovations/laya:multilingual       multilingual (mmBERT-base size, 307M)
+#   convaiinnovations/laya:typed-decisions    any other subfolder variant in the repo
+LAYA_REPOS = {"convaiinnovations/laya"}
+
+
+def laya_spec(model_id: str) -> tuple[str, str] | None:
+    """(repo, subfolder prefix) if model_id names a Laya checkpoint, else None."""
+    repo, _, variant = model_id.partition(":")
+    if repo.lower() not in LAYA_REPOS:
+        if Path(repo).is_dir() and (Path(repo) / "encoder" / "config.json").exists() and \
+                json.loads((Path(repo) / "config.json").read_text()).get("model_type") == "laya":
+            pass  # local copy of a Laya repo
+        else:
+            return None
+    variant = variant.strip("/")
+    return repo, "" if variant in ("", "en", "english") else variant + "/"
+
+
+def load_laya(model_id: str, dtype: torch.dtype = torch.float32, token: str | None = None):
+    """ModernBertModel holding a Laya checkpoint's fine-tuned encoder."""
+    from safetensors.torch import load_file
+    from transformers import AutoConfig, ModernBertModel
+
+    repo, sub = laya_spec(model_id)  # type: ignore[misc]
+    if Path(repo).is_dir():
+        root = Path(repo)
+    else:
+        from huggingface_hub import snapshot_download
+        root = Path(snapshot_download(repo, token=token, allow_patterns=[
+            f"{sub}encoder/*", f"{sub}model.safetensors", f"{sub}tokenizer/*"]))
+    cfg = AutoConfig.from_pretrained(str(root / sub / "encoder"))
+    model = ModernBertModel(cfg)
+    state = {k[len("encoder."):]: v for k, v in load_file(str(root / sub / "model.safetensors")).items()
+             if k.startswith("encoder.")}
+    missing, unexpected = model.load_state_dict(state, strict=False)
+    if missing:
+        raise RuntimeError(f"Laya checkpoint {model_id} is missing encoder weights: {missing[:5]}")
+    if unexpected:
+        raise RuntimeError(f"Unexpected encoder weights in {model_id}: {unexpected[:5]}")
+    return model.to(dtype)
+
+
+def load_backbone(model_id: str, **kwargs):
+    if laya_spec(model_id):
+        if kwargs.get("quantization_config") is not None:
+            raise RuntimeError("Laya is a ~300-400M encoder: use finetune='full' or 'lora' instead of QLoRA.")
+        return load_laya(model_id, kwargs.get("dtype", torch.float32))
+    from transformers import AutoModel
+    return AutoModel.from_pretrained(model_id, **kwargs)
+
+
+def load_tokenizer(model_id: str, trust_remote_code: bool = False):
+    if laya_spec(model_id):
+        return load_laya_tokenizer(model_id)
+    from transformers import AutoTokenizer
+    return AutoTokenizer.from_pretrained(model_id, trust_remote_code=trust_remote_code)
+
+
+def load_laya_tokenizer(model_id: str):
+    from transformers import AutoTokenizer
+    repo, sub = laya_spec(model_id)  # type: ignore[misc]
+    if Path(repo).is_dir():
+        root = Path(repo)
+    else:
+        from huggingface_hub import snapshot_download
+        root = Path(snapshot_download(repo, allow_patterns=[f"{sub}tokenizer/*", f"{sub}encoder/*"]))
+    tok_dir = root / sub / "tokenizer"
+    return AutoTokenizer.from_pretrained(str(tok_dir if tok_dir.exists() else root / sub / "encoder"))
+
+
 def detect_arch(model_id: str, trust_remote_code: bool = False) -> str:
+    if laya_spec(model_id):
+        return "encoder"
     from transformers import AutoConfig
     cfg = AutoConfig.from_pretrained(model_id, trust_remote_code=trust_remote_code)
     if cfg.model_type in ENCODER_TYPES:
@@ -87,8 +164,6 @@ class DecisionModel(nn.Module):
                   precision: str = "auto", device: str | torch.device = "auto", trust_remote_code: bool = False,
                   gradient_checkpointing: bool = False, lora_r: int = 16, lora_alpha: int = 32,
                   lora_dropout: float = 0.05, lora_targets: str = "all-linear") -> "DecisionModel":
-        from transformers import AutoModel, AutoTokenizer
-
         dev = device if isinstance(device, torch.device) else resolve_device(device)
         if arch == "auto":
             arch = detect_arch(base_model, trust_remote_code)
@@ -107,10 +182,10 @@ class DecisionModel(nn.Module):
                 load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True,
                 bnb_4bit_compute_dtype=dtype)
             kwargs["device_map"] = {"": 0}
-        tok = AutoTokenizer.from_pretrained(base_model, trust_remote_code=trust_remote_code)
+        tok = load_tokenizer(base_model, trust_remote_code)
         if tok.pad_token_id is None:
             tok.pad_token = tok.eos_token or tok.unk_token
-        backbone = AutoModel.from_pretrained(base_model, **kwargs)
+        backbone = load_backbone(base_model, **kwargs)
         if gradient_checkpointing and hasattr(backbone, "gradient_checkpointing_enable"):
             backbone.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
             if hasattr(backbone, "enable_input_require_grads"):
@@ -233,7 +308,7 @@ class DecisionModel(nn.Module):
         if meta["finetune"] == "full":
             backbone = AutoModel.from_pretrained(str(p / "backbone"), dtype=dtype, trust_remote_code=trc)
         else:
-            backbone = AutoModel.from_pretrained(meta["base_model"], dtype=dtype, trust_remote_code=trc)
+            backbone = load_backbone(meta["base_model"], dtype=dtype, trust_remote_code=trc)
             if (p / "adapter").exists():
                 from peft import PeftModel
                 backbone = PeftModel.from_pretrained(backbone, str(p / "adapter"))

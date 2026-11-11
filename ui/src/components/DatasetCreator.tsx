@@ -52,7 +52,7 @@ function HF({ onCreated }: { onCreated: (m: DatasetMeta) => void }) {
   const [hfId, setHfId] = useState("");
   const [config, setConfig] = useState<string>("");
   const [peek, setPeek] = useState<Json | null>(null);
-  const [form, setForm] = useState<Json>({ name: "", text_col: "", label_col: "", type: "choice", instructions: "", instructions_col: "", max_per_split: 5000 });
+  const [form, setForm] = useState<Json>({ name: "", text_col: "", label_col: "", type: "choice", instructions: "", instructions_col: "", max_per_split: 5000, top_labels: "", multi_label: "single" });
   const [busy, setBusy] = useState(false);
   const [job, setJob] = useState<any>(null);
 
@@ -75,16 +75,17 @@ function HF({ onCreated }: { onCreated: (m: DatasetMeta) => void }) {
 
   const usePreset = (p: Json) => {
     setHfId(p.hf_id);
-    setForm({ name: p.id, text_col: p.text_col, label_col: p.label_col, type: p.type, instructions: p.instructions, instructions_col: p.instructions_col || "", max_per_split: 5000 });
+    setForm({ name: p.id, text_col: p.text_col, label_col: p.label_col, type: p.type, instructions: p.instructions, instructions_col: p.instructions_col || "", max_per_split: 5000, top_labels: "", multi_label: "single" });
     inspect(p.hf_id, p.config || "");
   };
 
   const run = async () => {
     setBusy(true);
     try {
-      const { job: id } = await api.post("/api/datasets/hf", { hf_id: hfId, config: config || null, ...form, instructions_col: form.instructions_col || null, max_per_split: Number(form.max_per_split) || null });
+      const { job: id } = await api.post("/api/datasets/hf", { hf_id: hfId, config: config || null, ...form, instructions_col: form.instructions_col || null, max_per_split: Number(form.max_per_split) || null, top_labels: Number(form.top_labels) || null });
       const j = await waitJob(id, setJob);
-      toast(`Dataset ${j.result.name} ready`);
+      const prep = Object.entries(j.result.prep || {}).filter(([k, v]) => k !== "labels" && v).map(([k, v]) => `${v} ${k.replace(/_/g, " ")}`);
+      toast(`Dataset ${j.result.name} ready${prep.length ? ` · ${prep.join(", ")}` : ""}`);
       onCreated(j.result);
     } catch (e: any) {
       toast(e.message, "err");
@@ -124,7 +125,14 @@ function HF({ onCreated }: { onCreated: (m: DatasetMeta) => void }) {
             <Field label="Question type"><Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} options={QTYPES} /></Field>
             <Field label="Dataset name"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
             <Field label="Max rows per split"><Input type="number" value={form.max_per_split} onChange={(e) => setForm({ ...form, max_per_split: e.target.value })} /></Field>
+            <Field label="Keep top N labels" hint="Empty keeps all. Useful for long-tail labels (e.g. CWE)."><Input type="number" min={2} placeholder="all" value={form.top_labels} onChange={(e) => setForm({ ...form, top_labels: e.target.value })} /></Field>
+            {peek.columns.find((c: Json) => c.name === form.label_col)?.dtype === "list" && (
+              <Field label="Multi-label rows" hint="This label column holds lists.">
+                <Select value={form.multi_label} onChange={(e) => setForm({ ...form, multi_label: e.target.value })} options={[{ value: "single", label: "keep single-label rows" }, { value: "first", label: "use the first label" }, { value: "noul", label: "one yes/no question per label" }]} />
+              </Field>
+            )}
           </div>
+          <div className="text-[12px] text-faint">Rows with empty text or labels are skipped automatically. Numeric labels are ordered by value.</div>
           <Field label="Instructions (the question asked of the model)" hint={form.instructions_col ? `Per-row instructions from column "${form.instructions_col}"` : undefined}>
             <Input value={form.instructions} onChange={(e) => setForm({ ...form, instructions: e.target.value })} placeholder="e.g. Which banking intent does this message express?" />
           </Field>

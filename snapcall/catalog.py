@@ -53,10 +53,13 @@ MODELS: list[dict[str, Any]] = [
      "kind": "base", "langs": "multilingual", "context": 32768, "license": "apache-2.0", "support": "experimental",
      "family": "Qwen3.5", "notes": "Base of Bespoke Nimble 9B and kev-9B."},
     # --- existing decision models ---
-    {"id": "convaiinnovations/laya", "name": "Laya (Convai)", "params": 0.42, "arch": "encoder",
-     "kind": "decision", "langs": "en / multilingual", "context": 8192, "license": "apache-2.0",
-     "support": "experimental", "family": "Laya", "trust_remote_code": True,
-     "notes": "Open encoder decision model on ModernBERT/mmBERT. Custom architecture."},
+    {"id": "convaiinnovations/laya", "name": "Laya English (Convai)", "params": 0.395, "arch": "encoder",
+     "kind": "decision", "langs": "en", "context": 8192, "license": "apache-2.0", "support": "stable",
+     "family": "Laya", "notes": "Open encoder decision model (ModernBERT-large size). Snapcall loads its fine-tuned "
+                                 "encoder and trains a typed head on top."},
+    {"id": "convaiinnovations/laya:multilingual", "name": "Laya multilingual (Convai)", "params": 0.307,
+     "arch": "encoder", "kind": "decision", "langs": "multilingual", "context": 8192, "license": "apache-2.0",
+     "support": "stable", "family": "Laya", "notes": "mmBERT-base size, 1800+ languages, up to 8K tokens."},
     {"id": "LiquidAI/d1-omni-600M", "name": "d1 omni 600M (Liquid)", "params": 0.59, "arch": "causal",
      "kind": "decision", "langs": "multilingual", "context": 32768, "license": "lfm1.0",
      "support": "experimental", "family": "d1", "trust_remote_code": True,

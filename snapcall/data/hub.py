@@ -8,6 +8,7 @@ from typing import Any, Callable
 import httpx
 
 from . import save_dataset, split_records
+from .prep import build_records, humanize, is_empty  # noqa: F401  (humanize re-exported)
 
 DS_SERVER = "https://datasets-server.huggingface.co"
 
@@ -43,10 +44,6 @@ HF_PRESETS: list[dict[str, Any]] = [
 ]
 
 
-def humanize(name: str) -> str:
-    return name.replace("_", " ").replace("-", " ").strip()
-
-
 def peek(hf_id: str, config: str | None = None, split: str | None = None, token: str | None = None) -> dict[str, Any]:
     """Columns, splits and first rows via the datasets-server API (no download)."""
     h = {"Authorization": f"Bearer {token}"} if token else {}
@@ -64,68 +61,87 @@ def peek(hf_id: str, config: str | None = None, split: str | None = None, token:
     features = {f["name"]: f["type"] for f in j.get("features", [])}
     cols = []
     for name, t in features.items():
-        cols.append({"name": name, "dtype": t.get("dtype") or t.get("_type"),
-                     "names": t.get("names") if t.get("_type") == "ClassLabel" else None})
+        inner = t[0] if isinstance(t, list) and t else (t.get("feature") if isinstance(t, dict) else None)
+        is_list = isinstance(t, list) or (isinstance(t, dict) and t.get("_type") in ("Sequence", "List", "LargeList"))
+        if is_list:
+            names = inner.get("names") if isinstance(inner, dict) and inner.get("_type") == "ClassLabel" else None
+            cols.append({"name": name, "dtype": "list", "names": names})
+        else:
+            cols.append({"name": name, "dtype": t.get("dtype") or t.get("_type"),
+                         "names": t.get("names") if t.get("_type") == "ClassLabel" else None})
     rows = [r["row"] for r in j.get("rows", [])[:20]]
     return {"hf_id": hf_id, "configs": configs, "config": config, "splits": split_names, "columns": cols, "rows": rows}
+
+
+def class_names_of(feat) -> list[str] | None:
+    """Label names for a ClassLabel, or a list/Sequence of ClassLabel (multi-label)."""
+    from datasets import ClassLabel
+    if isinstance(feat, ClassLabel):
+        return list(feat.names)
+    inner = getattr(feat, "feature", None)
+    if isinstance(inner, ClassLabel):
+        return list(inner.names)
+    if isinstance(feat, (list, tuple)) and feat and isinstance(feat[0], ClassLabel):
+        return list(feat[0].names)
+    return None
+
+
+def convert_dataset(ds, *, text_col: str | list[str], label_col: str, qtype: str = "choice",
+                    instructions: str = "", instructions_col: str | None = None,
+                    label_descriptions: dict[str, str] | None = None, max_per_split: int | None = 5000,
+                    top_labels: int | None = None, other_label: str | None = None, multi_label: str = "single",
+                    seed: int = 42) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
+    """DatasetDict (or {split: Dataset}) -> System One records per split."""
+    first = ds[list(ds.keys())[0]]
+    names = class_names_of(first.features.get(label_col))
+    text_cols = [text_col] if isinstance(text_col, str) else list(text_col)
+    rng = random.Random(seed)
+
+    def state_of(row) -> str | None:
+        parts = [str(row[c]).strip() for c in text_cols if not is_empty(row.get(c))]
+        return "\n\n".join(parts) if parts else None
+
+    raw: dict[str, list] = {}
+    for split in ds.keys():
+        d = ds[split]
+        idx = list(range(len(d)))
+        rng.shuffle(idx)
+        rows = []
+        # oversample a little so skipped (empty/rare) rows don't shrink the split below max_per_split;
+        # in multi-label "noul" mode each row becomes one record per label, so cap rows exactly
+        take = None if not max_per_split else (max_per_split if multi_label == "noul" else int(max_per_split * 1.5))
+        for i in idx[:take]:
+            row = d[i]
+            instr = str(row[instructions_col]) if instructions_col else instructions
+            rows.append((state_of(row), instr, row[label_col]))
+        name = "validation" if split in ("dev", "valid", "val") else split
+        raw[name] = raw.get(name, []) + rows
+    recs, stats = build_records(raw, qtype=qtype, class_names=names, top_labels=top_labels,
+                                other_label=other_label, multi_label=multi_label,
+                                label_descriptions=label_descriptions)
+    if max_per_split and multi_label != "noul":
+        recs = {k: v[:max_per_split] for k, v in recs.items()}
+    return {k: v for k, v in recs.items() if v}, stats
 
 
 def import_hf(hf_id: str, *, name: str, text_col: str | list[str], label_col: str, qtype: str = "choice",
               instructions: str = "", instructions_col: str | None = None, config: str | None = None,
               label_descriptions: dict[str, str] | None = None, max_per_split: int | None = 5000,
+              top_labels: int | None = None, other_label: str | None = None, multi_label: str = "single",
               val_ratio: float = 0.1, test_ratio: float = 0.1, seed: int = 42, token: str | None = None,
               progress: Callable[[str], None] | None = None) -> dict[str, Any]:
-    from datasets import ClassLabel, load_dataset
+    from datasets import load_dataset
 
     say = progress or (lambda _m: None)
     say(f"Downloading {hf_id}…")
     ds = load_dataset(hf_id, config, token=token)
-    first = ds[list(ds.keys())[0]]
-    feat = first.features.get(label_col)
-    if isinstance(feat, ClassLabel):
-        label_names = list(feat.names)
-    else:
-        vals = set()
-        for s in ds:
-            vals.update(str(v) for v in ds[s][label_col][:200000])
-        label_names = sorted(vals, key=lambda v: (len(v), v))
-    text_cols = [text_col] if isinstance(text_col, str) else list(text_col)
-    rng = random.Random(seed)
-
-    def question(row) -> dict[str, Any]:
-        instr = str(row[instructions_col]) if instructions_col else instructions
-        if qtype == "noul":
-            return {"type": "noul", "instructions": instr}
-        if qtype == "score":
-            return {"type": "score", "instructions": instr,
-                    "criteria": [(label_descriptions or {}).get(n, humanize(n)) for n in label_names]}
-        return {"type": "choice", "instructions": instr,
-                "criteria": {n: (label_descriptions or {}).get(n, humanize(n)) for n in label_names}}
-
-    def answer(v):
-        if qtype == "noul":
-            return bool(v) if not isinstance(v, str) else v.lower() in ("true", "yes", "1")
-        idx = int(v) if isinstance(feat, ClassLabel) else label_names.index(str(v))
-        return idx if qtype == "score" else label_names[idx]
-
-    def convert(split) -> list[dict[str, Any]]:
-        idx = list(range(len(split)))
-        rng.shuffle(idx)
-        if max_per_split:
-            idx = idx[:max_per_split]
-        out = []
-        for i in idx:
-            row = split[i]
-            v = row[label_col]
-            if v is None or (isinstance(feat, ClassLabel) and int(v) < 0):
-                continue  # unlabeled row (e.g. hidden benchmark test labels)
-            state = "\n\n".join(str(row[c]) for c in text_cols) if len(text_cols) > 1 else str(row[text_cols[0]])
-            out.append({"state": state, "question": question(row), "answer": answer(row[label_col])})
-        return out
-
     say("Converting to System One format…")
-    conv = {s: convert(ds[s]) for s in ds.keys()}
-    conv = {("validation" if s in ("dev", "valid", "val") else s): v for s, v in conv.items() if v}
+    conv, stats = convert_dataset(ds, text_col=text_col, label_col=label_col, qtype=qtype, instructions=instructions,
+                                  instructions_col=instructions_col, label_descriptions=label_descriptions,
+                                  max_per_split=max_per_split, top_labels=top_labels, other_label=other_label,
+                                  multi_label=multi_label, seed=seed)
+    if not conv:
+        raise ValueError(f"No usable rows. {stats}")
     if "train" not in conv:
         allrows = [r for v in conv.values() for r in v]
         splits = split_records(allrows, val=val_ratio, test=test_ratio, seed=seed)
@@ -137,5 +153,9 @@ def import_hf(hf_id: str, *, name: str, text_col: str | list[str], label_col: st
                   "validation": sp["validation"] if need_val else conv["validation"],
                   "test": sp["test"] if need_test else conv["test"]}
     say("Saving…")
-    return save_dataset(name, splits, {"kind": "huggingface", "hf_id": hf_id, "config": config,
-                                       "text_col": text_cols, "label_col": label_col, "type": qtype})
+    meta = save_dataset(name, splits, {"kind": "huggingface", "hf_id": hf_id, "config": config,
+                                       "text_col": [text_col] if isinstance(text_col, str) else list(text_col),
+                                       "label_col": label_col, "type": qtype, "top_labels": top_labels,
+                                       "multi_label": multi_label, "prep": stats})
+    meta["prep"] = stats
+    return meta

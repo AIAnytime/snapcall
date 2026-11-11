@@ -21,8 +21,9 @@ def model_card(run: dict[str, Any], repo_id: str | None = None) -> str:
     cfg = run.get("config", {})
     meta = run.get("model_meta", {})
     ev = run.get("eval", {})
-    base = cfg.get("base_model", meta.get("base_model", ""))
-    cat = get_model(base) or {}
+    base_full = cfg.get("base_model", meta.get("base_model", ""))
+    cat = get_model(base_full) or {}
+    base = base_full.split(":")[0]  # Hub id without a variant suffix (e.g. laya:multilingual)
     q = meta.get("question") or {}
     repo = repo_id or f"your-username/{run['id']}"
     ds = cfg.get("data", {}).get("dataset", "")
@@ -151,7 +152,7 @@ curl -s localhost:8000/v1/systemone -H 'content-type: application/json' \\
 
 | | |
 |---|---|
-| Base model | `{base}` ({mi.get('arch', meta.get('arch', ''))}, {meta.get('pooling', '')} pooling) |
+| Base model | `{base_full}` ({mi.get('arch', meta.get('arch', ''))}, {meta.get('pooling', '')} pooling) |
 | Parameters | {mi.get('params', 0) / 1e6:.1f}M total, {mi.get('trainable_params', 0) / 1e6:.2f}M trainable |
 | Train / val / test | {summ.get('train_examples', '?')} / {summ.get('val_examples', '?')} / {summ.get('test_examples', '?')} |
 | Training time | {summ.get('elapsed_s', 0) / 60:.1f} min on `{mi.get('device', '?')}` |

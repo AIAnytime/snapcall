@@ -213,6 +213,9 @@ class HFImport(BaseModel):
     instructions: str = ""
     instructions_col: Optional[str] = None
     max_per_split: Optional[int] = 5000
+    top_labels: Optional[int] = None
+    other_label: Optional[str] = None
+    multi_label: str = "single"
     val_ratio: float = 0.1
     test_ratio: float = 0.1
 
@@ -225,6 +228,8 @@ def import_hf(r: HFImport):
         return do_import(r.hf_id, name=r.name, text_col=r.text_col, label_col=r.label_col, qtype=r.type,
                          instructions=r.instructions, instructions_col=r.instructions_col, config=r.config,
                          max_per_split=r.max_per_split, val_ratio=r.val_ratio, test_ratio=r.test_ratio,
+                         top_labels=r.top_labels or None, other_label=r.other_label or None,
+                         multi_label=r.multi_label,
                          token=load_settings().get("hf_token"),
                          progress=lambda m: JOBS[jid].update(message=m))
     return {"job": start_job("hf-import", job)}
@@ -244,12 +249,14 @@ async def upload_inspect(file: UploadFile = File(...)):
 @app.post("/api/datasets/upload")
 async def upload(file: UploadFile = File(...), name: str = Form(...), text_col: str = Form(""),
                  label_col: str = Form(""), type: str = Form("choice"), instructions: str = Form(""),
-                 val_ratio: float = Form(0.1), test_ratio: float = Form(0.1)):
+                 val_ratio: float = Form(0.1), test_ratio: float = Form(0.1), top_labels: int = Form(0),
+                 multi_label: str = Form("single")):
     from ..data.local import import_rows, parse_bytes
     try:
         rows = parse_bytes(await file.read(), file.filename or "")
         return import_rows(name, rows, text_col=text_col or None, label_col=label_col or None, qtype=type,
-                           instructions=instructions, val=val_ratio, test=test_ratio, filename=file.filename or "")
+                           instructions=instructions, val=val_ratio, test=test_ratio, filename=file.filename or "",
+                           top_labels=top_labels or None, multi_label=multi_label)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, str(e))
 
