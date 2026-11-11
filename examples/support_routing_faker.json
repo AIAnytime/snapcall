@@ -1,0 +1,15 @@
+{
+  "instructions": "Route this support message to the right team.",
+  "type": "choice",
+  "options": {
+    "billing": {"description": "Charges, refunds, invoices, payment methods.",
+                "templates": ["Hi, I'm {first_name}. I was charged {amount} twice for order {order_id}.",
+                              "{Can I|Could you|Please} get a refund for {order_id}? It was {amount}."]},
+    "shipping": {"description": "Delivery status, delays, wrong address.",
+                 "templates": ["My {product} (order {order_id}) still hasn't arrived after {days} days.",
+                               "Can you ship order {order_id} to {address} instead?"]},
+    "technical": {"description": "Bugs, login problems, errors in the app.",
+                  "templates": ["I get an error when logging in with {email}.",
+                                "The app crashes every time I open {product} settings."]}
+  }
+}

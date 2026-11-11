@@ -1,0 +1,14 @@
+# snapcall train --config examples/banking77.yaml
+base_model: answerdotai/ModernBERT-base
+finetune: full
+method: sft+rlcd
+data:
+  dataset: banking77          # snapcall data hf banking77
+  faker_augment: 0.2
+epochs: 3
+learning_rate: 5.0e-05
+batch_size: 16
+max_length: 768
+rlcd_epochs: 0.5
+rlcd_beta: 0.1
+temperature_scaling: true
