@@ -134,7 +134,18 @@ def estimate(r: MemReq):
     req = compute.estimate_memory_gb(r.params_b, r.finetune, r.batch_size, r.max_length, info.get("bf16", False),
                                      r.gradient_checkpointing)
     budget = system()["recommendations"]["memory_budget_gb"]
-    return {"memory_gb": req, "budget_gb": budget, "fit": compute.fit(req, budget)}
+    out = {"memory_gb": req, "budget_gb": budget, "fit": compute.fit(req, budget), "micro_batch": r.batch_size}
+    if out["fit"] == "no":
+        # The trainer splits each batch into micro-batches that fit (same effective batch), so find that size.
+        mb = r.batch_size
+        while mb > 1:
+            mb //= 2
+            m = compute.estimate_memory_gb(r.params_b, r.finetune, mb, r.max_length, info.get("bf16", False),
+                                           r.gradient_checkpointing)
+            if m <= budget * 0.85:
+                out.update(memory_gb=m, fit="auto", micro_batch=mb)
+                break
+    return out
 
 
 # ----------------------------------------------------------------- settings

@@ -1,91 +1,144 @@
-# Snapcall
+<div align="center">
+
+# ⚡ Snapcall
 
 **Build better decision models.**
-An open-source toolkit for training, evaluating and deploying Jev-style System One decision models.
 
-`Python` · `Open Source` · `CLI + Dashboard` · **Train. Evaluate. Deploy.**
+An open-source toolkit to **train, evaluate and deploy** calibrated System One decision models (Jev-style):
+typed questions in, a real probability for every option out, in one forward pass.
 
----
+[![PyPI](https://img.shields.io/pypi/v/snapcall?color=3ecf8e&label=pypi)](https://pypi.org/project/snapcall/)
+![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.3%2B-EE4C2C?logo=pytorch&logoColor=white)
+![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97-Transformers%20%C2%B7%20PEFT%20%C2%B7%20Hub-FFD21E)
+[![CI](https://github.com/AIAnytime/snapcall/actions/workflows/ci.yml/badge.svg)](https://github.com/AIAnytime/snapcall/actions/workflows/ci.yml)
+![RunPod](https://img.shields.io/badge/RunPod-ready-673AB7)
+![License](https://img.shields.io/badge/license-Apache--2.0-black)
 
-Decision models (TypeSafe's Jev, Cloudflare's Clef, Liquid's d1, Convai's Laya, Bespoke Nimble…) don't
-generate text. You give them a **state** (text or JSON) and **typed questions**, and they return a
-**calibrated probability for every option**, in one forward pass. They can't return an option you didn't
-offer, and when they say 0.8 they should be right about 80% of the time.
+**Train. Evaluate. Deploy.**
 
-Snapcall lets you build your own: pick a base model, bring data (or generate it), train with SFT + **RLCD**
-calibration, watch it live, evaluate calibration properly, push to the Hub with a generated model card,
-and serve it behind a System One compatible `/v1/systemone` API.
+</div>
 
-```
-state ─┐
-       ├─► backbone (encoder or LLM) ─► pool each option's span ─► decision head ─► softmax over options
-typed  ┘                                                                       (closed set, calibrated)
-question + options
-```
-
-## Features
-
-| | |
-|---|---|
-| **Base models** | ModernBERT, mmBERT (multilingual), DeBERTa, SmolLM2, LFM2/LFM2.5, Qwen3, Qwen3.5, or any HF id. Continue from open decision models: Laya, d1, Tev1, Clef (experimental). |
-| **Presets** | Laptop quickstart, multilingual, tiny LLM + LoRA, Liquid 1.2B, 4B QLoRA, Nimble-style 9B, linear probe. |
-| **Compute-aware** | Detects CUDA / Apple Silicon / CPU, estimates peak memory per model and mode, recommends presets, picks a micro-batch that fits, and recovers from OOM automatically without changing the effective batch. |
-| **Methods** | Full fine-tune, LoRA, QLoRA (CUDA), head-only probe. SFT, RLCD, or SFT → RLCD. Temperature scaling. |
-| **Hyperparameters with explainers** | Every knob documented: what it does, typical range, what happens when you raise or lower it (`snapcall explain`, UI side panel). |
-| **Data** | Hugging Face (presets + any dataset with column mapping), bring your own JSONL/JSON/CSV, LLM synthetic data (Anthropic or any OpenAI-compatible endpoint, Ollama included), Faker templates (no key needed). Stratified train/validation/test splits. |
-| **Faker** | 1) template generation, 2) PII-safe augmentation at train time (swaps emails, phones, amounts, IDs), 3) persona seeds that diversify LLM generation. |
-| **Observability** | Live loss, accuracy, ECE, Brier, LR, grad norm, throughput, memory, RLCD terms, smoothing like TensorBoard. TensorBoard event files are written too. Reliability diagrams, confusion matrices, mistake browser. |
-| **Ship** | Model metadata, playground, re-evaluation on any split, push to Hugging Face with an auto-generated model card, `/v1/systemone` server. |
-| **Cleanup** | Delete checkpoints, TensorBoard events, failed runs and Hugging Face cache entries, with sizes shown. |
-
-## Install
+![Snapcall dashboard](https://raw.githubusercontent.com/AIAnytime/snapcall/main/docs/assets/new-run.jpg)
 
 ```bash
 pip install snapcall
 snapcall ui
 ```
 
-Extras: `pip install "snapcall[anthropic]"` adds the Anthropic SDK for synthetic data, and
-`pip install "snapcall[qlora]"` adds bitsandbytes for QLoRA on CUDA.
+That's it: a dashboard opens at `http://127.0.0.1:7860`. Pick a model, attach data, press **Train**.
 
-From source (the dashboard has to be built once):
+---
 
-```bash
-git clone https://github.com/AIAnytime/snapcall && cd snapcall
-cd ui && pnpm install && pnpm build && cd ..   # builds into snapcall/server/static
-pip install -e ".[anthropic]"
+## 🤔 What is a decision model?
+
+Decision models like TypeSafe's **Jev**, Cloudflare's **Clef**, Liquid's **d1**, Convai's **Laya** and
+Bespoke's **Nimble** don't write text. You give them a **state** (text or JSON) and **typed questions**, and
+they return a **calibrated probability for every option**:
+
+```python
+model.decide(
+    state="My card still hasn't arrived and I need it for my trip on Friday",
+    questions={
+        "intent":  {"type": "choice", "instructions": "Which banking intent?",
+                    "criteria": {"card_arrival": "Card not delivered", "lost_or_stolen_card": "Card lost"}},
+        "urgency": {"type": "score",  "instructions": "How urgent?", "criteria": ["low", "medium", "high"]},
+        "upset":   {"type": "noul",   "instructions": "Is the customer upset?"},
+    },
+)
+# {"answers": {"intent": {"choice": "card_arrival", "confidence": 0.97, "probabilities": {...}},
+#              "urgency": {"score": 1.82, ...}, "upset": {"noul": 0.71}}}
 ```
 
-## Quickstart
+| Type | Answers | Returns |
+|---|---|---|
+| `choice` | one of 2–255 named options | the top option, its confidence, and a probability for every option |
+| `score` | an ordinal level (2–10 levels) | the expected level and a distribution over levels |
+| `noul` | yes / no | P(yes) |
 
-### Dashboard
+They **can't hallucinate an option** you didn't offer, and when they say 0.8 they should be right about 80%
+of the time. **Snapcall lets you build your own** on any open model, with your data, on your hardware.
+
+## ✨ Highlights
+
+- 🧠 **Any backbone**: ModernBERT, mmBERT (multilingual), DeBERTa, SmolLM2, LFM2/LFM2.5, Qwen3/3.5, or any Hugging Face id. You can also continue training open decision models (Laya, d1, Tev1, Clef).
+- 🎯 **Calibration-first training**: SFT → **RLCD** (Reinforcement Learning for Calibrated Decisions) → temperature scaling.
+- 🧮 **Compute-aware**: detects CUDA, Apple Silicon or CPU and shows which models fit before you train. It also picks a micro-batch that fits and recovers from out-of-memory errors automatically.
+- 🎛️ **Presets plus explained hyperparameters**: every knob says what it does and what happens when you raise or lower it.
+- 📦 **Data four ways**: 🤗 Hugging Face, your own JSONL/CSV, ✨ LLM synthetic data (Anthropic or any OpenAI-compatible API), and 🎭 Faker templates with no key needed.
+- 📈 **TensorBoard-style observability**: live loss, accuracy, ECE, Brier, LR, grad norm, throughput and memory, plus reliability diagrams and confusion matrices.
+- 🚀 **Ship it**: a playground, one-click push to the Hub with an auto-generated model card, and a System One compatible `/v1/systemone` server.
+- ☁️ **Cloud-GPU ready**: on RunPod, `snapcall ui` prints the pod URL, sets a password and can auto-stop the pod.
+- 🧹 **Cleanup built in**: checkpoints, event files, failed runs and Hugging Face cache, with sizes shown.
+
+## 🖥️ Tour
+
+| ![Hyperparameters with explainers](https://raw.githubusercontent.com/AIAnytime/snapcall/main/docs/assets/hyperparameters.jpg) | ![Datasets](https://raw.githubusercontent.com/AIAnytime/snapcall/main/docs/assets/datasets.jpg) |
+|---|---|
+| **🎛️ Tune with explainers.** What each knob does, typical values, and a live memory estimate. | **📦 Bring data.** Hugging Face presets, file upload, LLM synthetic data or Faker templates. |
+
+## 🧠 How it works
+
+![How Snapcall builds a decision model](https://raw.githubusercontent.com/AIAnytime/snapcall/main/docs/assets/architecture.png)
+
+1. **Typed decision head.** The state, question and options are rendered into one sequence. Each option's token span is pooled (mean for encoders, last token for decoders) and scored by a small head. A softmax over the options gives a closed-set distribution. Options are shuffled every step, so the model learns what an option *means*, not where it sits.
+2. **SFT.** Cross-entropy on the correct option (or on soft annotator distributions), with AdamW, warmup, a cosine or linear schedule, gradient accumulation, best-checkpoint restore and early stopping.
+3. **RLCD.** TypeSafe has only described RLCD at a high level. Snapcall's version is an open, KL-regularised proper-scoring objective:
+   - **reward:** Brier score plus log-score;
+   - **anchor:** `β·KL(π ‖ π_SFT)` keeps it close to the SFT model;
+   - **consistency:** a term that agrees across shuffled option orders.
+
+   Decisions stay put while confidence gets honest.
+4. **Temperature scaling** on the validation split (it never changes the top answer).
+5. **Evaluation:** accuracy, macro F1, 15-bin ECE, Brier, NLL, reliability bins and a confusion matrix.
+
+## 📊 Results
+
+Measured on an Apple M3 laptop (16 GB) with `answerdotai/ModernBERT-base` on
+[`dair-ai/emotion`](https://huggingface.co/datasets/dair-ai/emotion) (6 emotions), 3,000 training examples,
+2 epochs of SFT and 0.5 epochs of RLCD (33 minutes):
+
+| Stage | Val accuracy | Val ECE ↓ |
+|---|---|---|
+| After SFT | 77.4% | 0.032 |
+| After RLCD | **81.6%** | **0.020** |
+| **Held-out test** (2,000 examples) | **82.0%** | **0.019** |
+
+ECE is expected calibration error: an ECE of 0.019 means confidence is, on average, within about 2 points of
+actual accuracy.
+
+## 🚀 Quickstart
+
+### 🖥️ Dashboard
 
 ```bash
-snapcall ui            # http://127.0.0.1:7860
+pip install snapcall
+snapcall ui
 ```
 
-**New run** → pick a preset or model (each one shows whether it fits your machine) → pick or create a dataset →
-tune hyperparameters with the explainer panel → **Start training**. The run page streams metrics and logs, then
-gives you Evaluation, Model metadata, Test (playground), Publish (Hub + model card) and Files tabs.
+**New run** → pick a preset or model → pick or create a dataset → tune → **Start training**. The run page
+streams metrics and logs, then gives you **Evaluation**, **Model**, **Test**, **Publish** and **Files** tabs.
+Training runs in a background process, so you can close the browser.
 
-### CLI
+### ⌨️ CLI
 
 ```bash
-snapcall doctor                                   # hardware + recommendations
-snapcall data hf banking77                        # import a preset HF dataset
-snapcall train -p laptop-quick -d banking77       # train with live progress
-snapcall runs                                     # list runs
+snapcall doctor                                   # 🧮 hardware + recommendations
+snapcall data hf banking77                        # 📦 import a preset HF dataset
+snapcall train -p laptop-quick -d banking77       # 🏋️ train with live progress
+snapcall runs                                     # 📋 list runs
 snapcall predict <run> -s "I was charged twice for my coffee"
-snapcall eval <run> --split test
-snapcall push <run> --repo you/banking77-snapcall
-snapcall serve <run> --port 8000                  # System One compatible API
-snapcall clean --checkpoints --failed
+snapcall eval <run> --split test                  # 📊 metrics on any split
+snapcall push <run> --repo you/banking77-snapcall # 🚀 Hub + model card
+snapcall serve <run> --port 8000                  # 🔌 /v1/systemone API
+snapcall clean --checkpoints --failed             # 🧹 free disk
 ```
 
-More: `snapcall models`, `snapcall presets`, `snapcall explain [param]`, `snapcall init`, `snapcall logs <run> -f`,
-`snapcall stop <run>`, `snapcall card <run>`, `snapcall tensorboard`, `snapcall data {list,show,upload,faker,synth}`.
+More: `snapcall models`, `snapcall presets`, `snapcall explain [param]`, `snapcall init`,
+`snapcall logs <run> -f`, `snapcall stop <run>`, `snapcall card <run>`, `snapcall tensorboard`,
+`snapcall data {list,show,upload,faker,synth}`.
 
-### Python
+### 🐍 Python
 
 ```python
 from snapcall import Trainer, TrainConfig, DataConfig, DecisionModel
@@ -95,53 +148,58 @@ cfg = TrainConfig(
     data=DataConfig(dataset="banking77"),
     method="sft+rlcd", finetune="full", epochs=3, learning_rate=5e-5,
 )
-summary = Trainer(cfg, run_dir="runs/banking77").train()
+Trainer(cfg, run_dir="runs/banking77").train()
 
 model = DecisionModel.from_pretrained("runs/banking77/model")   # or a Hub repo id
-model.decide(
-    state="My card hasn't arrived yet",
-    questions={
-        "intent": {"type": "choice", "instructions": "Which banking intent?",
-                   "criteria": {"card_arrival": "Card not delivered", "lost_or_stolen_card": "Card lost"}},
-        "upset": {"type": "noul", "instructions": "Is the customer upset?"},
-        "urgency": {"type": "score", "instructions": "How urgent?", "criteria": ["low", "medium", "high"]},
-    },
-)
+model.decide(state="Where is my new card?", questions={"intent": model.meta["question"]})
 ```
 
-## Data format
+## 🧩 Models and presets
 
-One decision per JSONL line (System One shape):
+| Family | Models | Mode | Notes |
+|---|---|---|---|
+| Encoders | ModernBERT base/large, mmBERT small/base, DeBERTa v3 | full | ⚡ Fastest, Laya-style. Trains on a laptop |
+| Small LLMs | SmolLM2, LFM2 350M, LFM2.5 1.2B, Qwen3 0.6B/1.7B/4B | LoRA · QLoRA | Longer states, more reasoning |
+| Big bases | Qwen3.5 4B/9B Base | LoRA · QLoRA | Bases of Nimble, Tev1, Decider, kev |
+| Decision models | Laya, d1 600M/3B, Tev1 4B, Clef Flash 9B, Clef 27B | LoRA · QLoRA | 🧪 Experimental: continue from an open System One model |
+
+| Preset | For | Base |
+|---|---|---|
+| `laptop-quick` | 💻 CPU / Apple Silicon | ModernBERT base, full |
+| `multilingual` | 🌍 100+ languages | mmBERT base, full |
+| `tiny-llm-lora` | 8 GB GPU | Qwen3 0.6B, LoRA |
+| `liquid-1b` | 12 GB GPU | LFM2.5 1.2B Base, LoRA |
+| `gpu-4b-qlora` | CUDA 12 GB+ | Qwen3 4B, QLoRA |
+| `nimble-9b` | CUDA 24 GB+ | Qwen3.5 9B Base, QLoRA |
+| `probe` | ⏱️ seconds | frozen backbone, head only |
+
+## 📦 Data
+
+| Source | How |
+|---|---|
+| 🤗 Hugging Face | Presets (Banking77, Emotion, AG News, SST-2, BoolQ, Yelp, MASSIVE, multilingual sentiment) or any dataset with column mapping |
+| 📄 Your files | `.jsonl`, `.json`, `.csv`, `.tsv`: native System One rows or any table with a text and a label column |
+| ✨ LLM synthetic | Describe the use case. The LLM proposes the question and options, then writes balanced examples (Anthropic, OpenAI, OpenRouter, Groq, Ollama…) |
+| 🎭 Faker | Templates such as `"I was charged {amount} for order {order_id}"`, filled with realistic fake values in 14 locales, no API key |
+
+Faker also does **PII-safe augmentation** at train time: it swaps emails, phones, amounts and IDs, so the
+model learns the decision rather than the entities. Every dataset gets stratified train/validation/test splits.
+
+<details>
+<summary>📝 Native row format</summary>
 
 ```json
 {"state": "I was charged twice", "question": {"type": "choice", "instructions": "Route to a team",
   "criteria": {"billing": "Charges, refunds", "shipping": "Delivery"}}, "answer": "billing"}
 ```
 
-Multi-question rows (`"questions": {...}, "answers": {...}`) are flattened automatically. `score` answers are
-level indices, `noul` answers are booleans. Optional `"soft": {"billing": 0.7, "shipping": 0.3}` trains on
-annotator distributions. CSV/TSV/JSON tables can be mapped with a text column and a label column.
+Multi-question rows (`"questions": {...}, "answers": {...}`) are flattened automatically. `score` answers
+are level indices, and `noul` answers are booleans. An optional `"soft": {"billing": 0.7, "shipping": 0.3}`
+trains on annotator distributions.
 
-Question types: **choice** (2–255 named options), **score** (2–10 ordered levels, returns the expected level),
-**noul** (yes/no, returns P(yes)).
+</details>
 
-## How training works
-
-1. **Typed decision head.** The state, question and options are rendered into one sequence. Each option's
-   token span is pooled (mean for encoders, last token for decoders) and scored by a small head. Softmax over
-   options gives a closed-set distribution. Options are shuffled every time an example is seen, so the model
-   learns what an option means rather than its position.
-2. **SFT.** Cross-entropy on the correct option (or soft targets), AdamW with warmup and a cosine/linear schedule,
-   gradient accumulation, clipping, per-epoch evaluation, best-checkpoint restore, early stopping.
-3. **RLCD (Reinforcement Learning for Calibrated Decisions).** TypeSafe has only described RLCD at a high level;
-   Snapcall's version is an open, KL-regularised **proper-scoring objective**: maximise Brier + log-score
-   rewards, plus a `β·KL(π ‖ π_SFT)` anchor to the frozen SFT policy, plus an **option-order consistency**
-   term (symmetric KL between two random option orderings). It keeps decisions and reshapes confidence.
-4. **Temperature scaling** on the validation split (never changes the argmax).
-5. **Evaluation**: accuracy, macro F1, 15-bin ECE, Brier, NLL, average confidence, score MAE, reliability
-   bins, confusion matrix.
-
-## Run on a cloud GPU (RunPod)
+## ☁️ Run on a cloud GPU (RunPod)
 
 ```bash
 pip install snapcall
@@ -149,25 +207,14 @@ snapcall ui --auto-stop 2
 ```
 
 On a RunPod pod, `snapcall ui` detects the pod and:
-- prints the proxy URL;
-- password-protects the dashboard;
-- keeps runs and models on `/workspace`;
-- with `--auto-stop`, stops the pod after N hours.
+- 🔗 prints the proxy URL;
+- 🔒 generates a password (proxy URLs are public);
+- 💾 keeps runs and models on `/workspace`;
+- ⏱️ with `--auto-stop`, stops the pod after N hours so a small balance lasts.
 
-See **[deploy/runpod/README.md](deploy/runpod/README.md)** for pod settings and a $2 session plan.
+See the **[RunPod guide](deploy/runpod/README.md)** for pod settings and a $2 session plan.
 
-Anywhere else, expose the dashboard beyond localhost with `snapcall ui --host 0.0.0.0`. A password is
-generated automatically, or set your own with `--password` or `SNAPCALL_PASSWORD`.
-
-## Workspace
-
-Everything lives in `~/.snapcall` (override with `SNAPCALL_HOME`): `datasets/`, `runs/<id>/` (`config.json`,
-`status.json`, `metrics.jsonl`, `train.log`, `tensorboard/`, `checkpoints/`, `eval.json`, `model/`), and
-`settings.json` (API keys, chmod 600; `HF_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`
-env vars work as fallbacks). Runs execute in a background process, so the UI and CLI can both follow them,
-and closing the browser doesn't stop training.
-
-## Serving
+## 🔌 Serving
 
 ```bash
 snapcall serve <run-or-hub-repo> --port 8000
@@ -177,18 +224,47 @@ curl -s localhost:8000/v1/systemone -H 'content-type: application/json' -d '{
                 "criteria": {"card_arrival": "Card not delivered", "activate_my_card": "Activation"}}}}'
 ```
 
-The dashboard server exposes the same endpoint at `/v1/systemone` (`"model": "<run id>"`, or omit it for the
-latest model).
+The dashboard server exposes the same endpoint at `/v1/systemone`. Pass `"model": "<run id>"`, or omit it
+to use the latest model.
 
-## Limitations
+## 🗂️ Workspace
 
-- Text states only (no images or `box` questions yet).
-- QLoRA needs CUDA + bitsandbytes. On Apple Silicon use LoRA in bf16.
-- Qwen3.5, d1, Laya and Clef checkpoints are marked experimental: they may need a newer `transformers` or
-  `trust_remote_code`.
-- Large option sets (50+) make sequences long; the memory planner shrinks micro-batches automatically, but
-  training is slower.
+Everything lives in `~/.snapcall` (override with `SNAPCALL_HOME`):
+- `datasets/`
+- `runs/<id>/`, which holds `config.json`, `status.json`, `metrics.jsonl`, `train.log`, `tensorboard/`, `checkpoints/`, `eval.json` and `model/`
+- `settings.json`, which holds API keys (chmod 600)
+
+`HF_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and `OPENAI_BASE_URL` work as fallbacks. To expose the
+dashboard beyond localhost, use `snapcall ui --host 0.0.0.0`. It is then password-protected automatically,
+or you can set `--password` / `SNAPCALL_PASSWORD`.
+
+## 🛠️ Development
+
+```bash
+git clone https://github.com/AIAnytime/snapcall && cd snapcall
+cd ui && pnpm install && pnpm build && cd ..   # dashboard -> snapcall/server/static
+pip install -e ".[anthropic,dev]"
+pytest -q
+```
+
+Extras: `snapcall[anthropic]` adds the Anthropic SDK for synthetic data, and `snapcall[qlora]` adds
+bitsandbytes for QLoRA on CUDA.
+
+## 🗺️ Limitations and roadmap
+
+- Text states only. Image states and `box` questions are next.
+- QLoRA needs CUDA plus bitsandbytes. On Apple Silicon, use LoRA in bf16.
+- Qwen3.5, d1, Laya and Clef checkpoints are experimental.
+- Large option sets (50+) make sequences long. The memory planner shrinks micro-batches automatically, but training is slower.
+
+## 🤝 Contributing
+
+Issues and PRs are welcome: new backbones, question types, datasets and evals especially.
 
 ---
 
-Built by **[AI Anytime](https://www.youtube.com/@AIAnytime)**. Apache-2.0.
+<div align="center">
+
+Built with ❤️ by **[AI Anytime](https://www.youtube.com/@AIAnytime)** · Apache-2.0
+
+</div>

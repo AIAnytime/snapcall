@@ -39,8 +39,8 @@ const FIELDS: FieldDef[] = [
   { key: "seed", kind: "num", step: 1 },
 ];
 
-const fitTone = { fits: "accent", tight: "warn", slow: "warn", no: "danger", cpu: "warn" } as const;
-const fitLabel = { fits: "Fits", tight: "Tight", slow: "Slow on CPU", no: "Won't fit", cpu: "CPU" } as const;
+const fitTone = { fits: "accent", tight: "warn", slow: "warn", no: "danger", cpu: "warn", auto: "info" } as const;
+const fitLabel = { fits: "Fits", tight: "Tight", slow: "Slow on CPU", no: "Won't fit", cpu: "CPU", auto: "Fits with micro-batching" } as const;
 
 export default function NewRun() {
   const nav = useNavigate();
@@ -330,7 +330,11 @@ export default function NewRun() {
                 </div>
                 <div className="mt-2 text-[22px] font-medium tabular">{mem.memory_gb} GB <span className="text-[13px] font-normal text-faint">/ {mem.budget_gb} GB</span></div>
                 <div className="mt-2 h-1.5 rounded-full bg-panel-2"><div className="h-1.5 rounded-full" style={{ width: `${Math.min(100, (mem.memory_gb / Math.max(mem.budget_gb, 0.1)) * 100)}%`, background: mem.fit === "no" ? "var(--danger)" : mem.fit === "fits" ? "var(--accent)" : "var(--warn)" }} /></div>
-                <div className="mt-2 text-[12px] text-faint">Effective batch {cfg.batch_size * cfg.grad_accum}. Rough estimate (±30%).</div>
+                <div className="mt-2 text-[12px] text-faint">
+                  {mem.fit === "auto"
+                    ? <>Snapcall will run micro-batches of {mem.micro_batch} × {Math.round(cfg.batch_size / mem.micro_batch)} accumulation steps, so the effective batch stays {cfg.batch_size * cfg.grad_accum}.</>
+                    : <>Effective batch {cfg.batch_size * cfg.grad_accum}.</>} Rough estimate (±30%), based on max length.
+                </div>
               </Card>
             )}
           </div>
@@ -362,7 +366,7 @@ export default function NewRun() {
           <div className="space-y-4">
             <Card className="p-4 space-y-4">
               <Field label="Run name (optional)"><Input value={cfg.run_name ?? ""} onChange={(e) => set("run_name", e.target.value)} placeholder={cfg.base_model.split("/").pop()} /></Field>
-              {mem?.fit === "no" && <Alert t="danger">This configuration likely won't fit in memory. Try LoRA/QLoRA, a smaller batch, or a shorter max length.</Alert>}
+              {mem?.fit === "no" && <Alert t="danger">This configuration likely won't fit in memory even at micro-batch 1. Try LoRA/QLoRA or a shorter max length.</Alert>}
               {model?.support === "experimental" && <Alert t="warn">Experimental model: may need a newer transformers or trust_remote_code.</Alert>}
               <Button variant="primary" className="w-full" icon={<Play className="size-3.5" />} loading={submitting} onClick={submit}>Start training</Button>
               <div className="text-[12px] text-faint">Runs in a background process. You can close this tab; progress is saved under ~/.snapcall/runs.</div>
