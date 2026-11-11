@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hmac
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -13,9 +16,9 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from .. import __version__, catalog, compute, runs
@@ -27,6 +30,36 @@ from ..tracking import RunLogger
 STATIC = Path(__file__).parent / "static"
 
 app = FastAPI(title="Snapcall", version=__version__)
+
+# Optional password (required when the dashboard is reachable from the internet, e.g. a RunPod proxy URL).
+# Browsers get HTTP Basic auth (any username); API clients can send `Authorization: Bearer <password>`.
+PASSWORD = os.environ.get("SNAPCALL_PASSWORD") or None
+
+
+@app.middleware("http")
+async def require_password(request: Request, call_next):
+    if PASSWORD and request.url.path != "/health":
+        h = request.headers.get("authorization", "")
+        ok = False
+        if h.startswith("Bearer "):
+            ok = hmac.compare_digest(h[7:].encode(), PASSWORD.encode())
+        elif h.startswith("Basic "):
+            try:
+                _, _, pw = base64.b64decode(h[6:]).decode().partition(":")
+                ok = hmac.compare_digest(pw.encode(), PASSWORD.encode())
+            except Exception:  # noqa: BLE001
+                ok = False
+        if not ok:
+            return Response("Authentication required", status_code=401,
+                            headers={"WWW-Authenticate": 'Basic realm="Snapcall"'})
+    return await call_next(request)
+
+
+@app.get("/health")
+def health():
+    return {"ok": True, "version": __version__}
+
+
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
                    allow_methods=["*"], allow_headers=["*"])
 
@@ -485,6 +518,9 @@ def tensorboard(port: int = 6006):
                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         TB["port"] = port
         time.sleep(2.5)
+    pod = os.environ.get("RUNPOD_POD_ID")
+    if pod:  # RunPod HTTP proxy (port must be exposed on the pod)
+        return {"url": f"https://{pod}-{TB['port']}.proxy.runpod.net"}
     return {"url": f"http://localhost:{TB['port']}"}
 
 

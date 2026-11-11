@@ -49,17 +49,52 @@ def version():
 
 
 @app.command()
-def ui(port: int = typer.Option(7860, help="Port"), host: str = "127.0.0.1",
-       no_browser: bool = typer.Option(False, "--no-browser")):
-    """Launch the dashboard."""
+def ui(port: int = typer.Option(7860, help="Port"),
+       host: Optional[str] = typer.Option(None, help="Bind address (default 127.0.0.1; 0.0.0.0 on RunPod)"),
+       no_browser: bool = typer.Option(False, "--no-browser"),
+       password: Optional[str] = typer.Option(None, envvar="SNAPCALL_PASSWORD",
+                                              help="Require this password (HTTP Basic, any username)"),
+       auto_stop: float = typer.Option(0, "--auto-stop", envvar="SNAPCALL_MAX_HOURS",
+                                       help="RunPod: stop this pod after N hours (protects your balance)")):
+    """Launch the dashboard. On a RunPod pod it is reachable at the pod's proxy URL, with a password."""
+    import os
+    import secrets
+    import subprocess
     import threading
     import webbrowser
 
     import uvicorn
-    url = f"http://{host}:{port}"
-    con.print(Panel.fit(f"[bold]Snapcall[/] v{__version__}\nDashboard  [link={url}]{url}[/]\n"
-                        f"[dim]Built by AI Anytime[/]", border_style=ACCENT))
-    if not no_browser:
+
+    from .paths import on_runpod, snapcall_home
+    pod = os.environ.get("RUNPOD_POD_ID") if on_runpod() else None
+    host = host or ("0.0.0.0" if pod else "127.0.0.1")
+    public = host not in ("127.0.0.1", "localhost")
+    if public and not password:
+        # Public URLs need a password: generate one once and keep it in the workspace.
+        pw_file = snapcall_home() / ".password"
+        if not pw_file.exists():
+            pw_file.write_text(secrets.token_urlsafe(12))
+            pw_file.chmod(0o600)
+        password = pw_file.read_text().strip()
+    if password:
+        os.environ["SNAPCALL_PASSWORD"] = password
+
+    url = f"https://{pod}-{port}.proxy.runpod.net" if pod else f"http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}"
+    lines = [f"[bold]Snapcall[/] v{__version__}", f"Dashboard  [link={url}]{url}[/]"]
+    if password:
+        lines.append(f"Login      any username · password [bold]{password}[/]")
+    lines.append(f"Workspace  {snapcall_home()}")
+    if pod:
+        if auto_stop > 0:
+            subprocess.Popen(["bash", "-c", f"sleep {int(auto_stop * 3600)}; runpodctl pod stop {pod}"],
+                             start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            lines.append(f"Auto-stop  pod stops in {auto_stop:g} h")
+        else:
+            lines.append("[dim]Tip: snapcall ui --auto-stop 2 stops the pod after 2 h[/]")
+        lines.append(f"[dim]Expose HTTP port {port} on the pod if the link does not open[/]")
+    lines.append("[dim]Built by AI Anytime[/]")
+    con.print(Panel.fit("\n".join(lines), border_style=ACCENT))
+    if not no_browser and not pod and not public:
         threading.Timer(1.2, lambda: webbrowser.open(url)).start()
     uvicorn.run("snapcall.server.app:app", host=host, port=port, log_level="warning")
 

@@ -41,17 +41,19 @@ question + options
 ## Install
 
 ```bash
-pip install snapcall                 # core
-pip install "snapcall[anthropic]"    # + Anthropic SDK for synthetic data
-pip install "snapcall[qlora]"        # + bitsandbytes (CUDA)
+pip install snapcall
+snapcall ui
 ```
 
-From source:
+Extras: `pip install "snapcall[anthropic]"` adds the Anthropic SDK for synthetic data, and
+`pip install "snapcall[qlora]"` adds bitsandbytes for QLoRA on CUDA.
+
+From source (the dashboard has to be built once):
 
 ```bash
 git clone https://github.com/AIAnytime/snapcall && cd snapcall
+cd ui && pnpm install && pnpm build && cd ..   # builds into snapcall/server/static
 pip install -e ".[anthropic]"
-cd ui && pnpm install && pnpm build    # builds the dashboard into snapcall/server/static
 ```
 
 ## Quickstart
@@ -138,6 +140,24 @@ Question types: **choice** (2–255 named options), **score** (2–10 ordered le
 4. **Temperature scaling** on the validation split (never changes the argmax).
 5. **Evaluation**: accuracy, macro F1, 15-bin ECE, Brier, NLL, average confidence, score MAE, reliability
    bins, confusion matrix.
+
+## Run on a cloud GPU (RunPod)
+
+```bash
+pip install snapcall
+snapcall ui --auto-stop 2
+```
+
+On a RunPod pod, `snapcall ui` detects the pod and:
+- prints the proxy URL;
+- password-protects the dashboard;
+- keeps runs and models on `/workspace`;
+- with `--auto-stop`, stops the pod after N hours.
+
+See **[deploy/runpod/README.md](deploy/runpod/README.md)** for pod settings and a $2 session plan.
+
+Anywhere else, expose the dashboard beyond localhost with `snapcall ui --host 0.0.0.0`. A password is
+generated automatically, or set your own with `--password` or `SNAPCALL_PASSWORD`.
 
 ## Workspace
 

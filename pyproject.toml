@@ -7,7 +7,8 @@ name = "snapcall"
 version = "0.1.0"
 description = "Build better decision models. Open-source toolkit to train, evaluate and deploy calibrated Jev-style System One decision models. CLI + dashboard."
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "AI Anytime" }]
 requires-python = ">=3.10"
 keywords = ["decision-model", "system-one", "jev", "snapcall", "fine-tuning", "calibration", "rlcd", "lora"]
@@ -46,8 +47,17 @@ dev = ["pytest", "ruff"]
 [project.scripts]
 snapcall = "snapcall.cli:main"
 
+[project.urls]
+Homepage = "https://github.com/AIAnytime/snapcall"
+Repository = "https://github.com/AIAnytime/snapcall"
+Issues = "https://github.com/AIAnytime/snapcall/issues"
+
 [tool.hatch.build.targets.wheel]
 packages = ["snapcall"]
+artifacts = ["snapcall/server/static/**"]
+
+[tool.hatch.build.targets.sdist]
+include = ["snapcall", "tests", "README.md", "pyproject.toml", "LICENSE"]
 artifacts = ["snapcall/server/static/**"]
 
 [tool.ruff]

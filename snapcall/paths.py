@@ -8,8 +8,13 @@ from pathlib import Path
 from typing import Any
 
 
+def on_runpod() -> bool:
+    return bool(os.environ.get("RUNPOD_POD_ID")) and Path("/workspace").is_dir()
+
+
 def snapcall_home() -> Path:
-    p = Path(os.environ.get("SNAPCALL_HOME", Path.home() / ".snapcall")).expanduser()
+    default = Path("/workspace/.snapcall") if on_runpod() else Path.home() / ".snapcall"
+    p = Path(os.environ.get("SNAPCALL_HOME", default)).expanduser()
     p.mkdir(parents=True, exist_ok=True)
     return p
 

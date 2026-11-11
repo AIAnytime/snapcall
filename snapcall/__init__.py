@@ -8,6 +8,12 @@ Built by AI Anytime.
 __version__ = "0.1.0"
 
 import logging as _logging
+import os as _os
+
+# Cloud GPU pods (RunPod): keep model downloads on the persistent /workspace volume instead of the small,
+# ephemeral container disk. Must run before huggingface_hub is imported anywhere.
+if _os.environ.get("RUNPOD_POD_ID") and _os.path.isdir("/workspace") and not _os.environ.get("HF_HOME"):
+    _os.environ["HF_HOME"] = "/workspace/.cache/huggingface"
 
 _logging.getLogger("torch.distributed.elastic.multiprocessing.redirects").setLevel(_logging.ERROR)
 
